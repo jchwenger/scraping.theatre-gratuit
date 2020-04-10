@@ -18,7 +18,8 @@ def main():
     html_re = regex.compile('^(?!.*titlepage).*\.x*html', regex.IGNORECASE)
 
     tmp_dir = "tmp"
-    if not os.path.isdir(tmp_dir): os.mkdir(tmp_dir)
+    if not os.path.isdir(tmp_dir):
+        os.mkdir(tmp_dir)
 
     txt_dir = 'theatregratuit-txt'
     if not os.path.isdir(txt_dir):
