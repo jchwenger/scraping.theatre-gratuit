@@ -18,10 +18,9 @@ def main():
         )
     separator_print()
 
-    # tmp_dirs = [f"tmp{i}" for i in range(1,3)]
-    # for tmp_dir in tmp_dirs:
-    #     if not os.path.isdir(tmp_dir):
-    #         os.mkdir(tmp_dir)
+    tmp_dir = "tmp1"
+    if not os.path.isdir(tmp_dir):
+        os.mkdir(tmp_dir)
 
     # ds_dir = "theatregratuit-dataset"
     # if not os.path.isdir(ds_dir):
@@ -34,24 +33,33 @@ def main():
     # (especially as some files have multiple PERSONNAGES lists)
     for i, fname in enumerate(fnames):
 
+        print(f"{i:4}/{n_files} | {fname}")
+
         with open(
             os.path.join(txt_dir, fname), "r", encoding="utf-8", errors="ignore"
         ) as f:
             raw = f.read()
-            lines = f.readlines()
-            lines_len = len(lines)
 
-        chars_block_it =  regex.finditer(regices["characters_block"], raw)
-        found = 0
-        blocks = []
-        for chars_block in chars_block_it:
-            if chars_block:
-                found += 1
-                blocks.append(chars_block.group(0))
-        if found > 2:
-            print(fname)
-            [print(b) for b in blocks]
-            break
+        # chars_block_it =  regex.finditer(regices["characters_block"], raw)
+        # found = 0
+        # blocks = []
+        # for chars_block in chars_block_it:
+        #     if chars_block:
+        #         found += 1
+        #         # annoying exceptions: when the regex catches an entire block of play
+        #         if len(chars_block.group(0)) < 6000:
+        #             raw = regex.sub(regex.escape(chars_block.group(0)), "", raw)
+        #             blocks.append(chars_block.group(0))
+
+        # if found:
+        #     print(fname)
+        #     for b in blocks:
+        #         print(b)
+        #     print('-'*40)
+        #     print()
+
+        lines = raw.split('\n')
+        lines_len = len(lines)
 
         char_index = find_characters(fname, lines, lines_len, regices, off)
 
@@ -60,6 +68,7 @@ def main():
             author_index = find_author(fname, lines, lines_len, regices, off)
         else:
             author_index = char_index
+        # author_index = find_author(fname, lines, lines_len, regices, off)
 
         # end business
         end_index = find_end(fname, lines, lines_len, regices, off)
@@ -96,11 +105,10 @@ def main():
         #         o.write(trimmed)
 
         new_lines = []
-        replaced = False
         for j, l in enumerate(lines[author_index:end_index]):
 
             # remove end trailing space, replace multiple annoying spaces by one
-            l = regex.sub(regices["trailing_space"], "", l) + "\n"
+            l =  l.strip() + "\n"
             l = regex.sub(regices["non_breaking_space"], " ", l)
 
             # check for full caps line
@@ -111,6 +119,8 @@ def main():
                 if trail_re:
                     new_l = l[:trail_re.span()[0]] + ".\n"
                     # print_test(l, new_l)
+                    new_lines.append("<|e|>\n")
+                    new_lines.append("<|s|>\n")
                     new_lines.append(new_l)
                 continue
 
@@ -121,86 +131,113 @@ def main():
             if annoying_re:
                 caps_init_re = regex.match(regices["caps_init"], l[annoying_re.span()[1]:])
 
+
+            # if a character in caps detected at beginning of line
             if caps_init_re:
 
                 caps_init_end_index = caps_init_re.span()[1]
                 caps_init_start = l[:caps_init_end_index]
                 caps_init_rest = l[caps_init_end_index:]
 
+                new_lines.append("<|e|>\n")
+                new_lines.append("<|s|>\n")
+                new_lines.append(l)
+                continue
+
+            char_lc_dot_dash_re = regex.match(regices["char_lc_dot_dash"], l)
+
+            if char_lc_dot_dash_re:
+                new_lines.append("<|e|>\n")
+                new_lines.append("<|s|>\n")
+                char = char_lc_dot_dash_re.group(1) + "\n"
+                rest = char_lc_dot_dash_re.group(2) + "\n"
+                new_lines.append(char.upper())
+                new_lines.append(rest)
+                continue
+
+
+            new_lines.append(l)
+
+
+        new_lines.append("<|e|>")
+
+        with open(os.path.join(tmp_dir, fname), 'w') as o:
+            o.writelines(new_lines)
+
                 # print_test(l, caps_init_start, caps_init_rest)
                 # continue
 
-                # is there a dash on the line?
-                dash_re = regex.match(regices["dash_and_more"], caps_init_rest)
-                if dash_re:
-                    end_dash = dash_re.span()[1]
-                    dashless = caps_init_start + dash_re.group(1) + "."
-                    rest = caps_init_rest[end_dash:]
-                    # print_test(l, dashless, rest)
-                    new_lines.append(dashless + "\n")
-                    new_lines.append(rest)
-                    continue
+                # # is there a dash on the line?
+                # dash_re = regex.match(regices["dash_and_more"], caps_init_rest)
+                # if dash_re:
+                #     end_dash = dash_re.span()[1]
+                #     dashless = caps_init_start + dash_re.group(1) + "."
+                #     rest = caps_init_rest[end_dash:]
+                #     # print_test(l, dashless, rest)
+                #     new_lines.append(dashless + "\n")
+                #     new_lines.append(rest)
+                #     continue
 
                 # is there a colon on the line?
-                colon_re = regex.match(regices["colon_and_more"], caps_init_rest)
-                if colon_re:
-                    end_colon = colon_re.span()[1]
-                    colonless = caps_init_start + colon_re.group(1) + "."
-                    rest = caps_init_rest[end_colon:]
-                    print_test(l, caps_init_start, caps_init_rest)
-                    print_test(l, colonless, rest, utf=False)
-                    new_lines.append(colonless + "\n")
-                    new_lines.append(rest)
-                    continue
+                # colon_re = regex.match(regices["colon_and_more"], caps_init_rest)
+                # if colon_re:
+                #     end_colon = colon_re.span()[1]
+                #     colonless = caps_init_start + colon_re.group(1) + "."
+                #     rest = caps_init_rest[end_colon:]
+                #     # print_test(l, caps_init_start, caps_init_rest)
+                #     # print_test(l, colonless, rest, utf=False)
+                #     new_lines.append(colonless + "\n")
+                #     new_lines.append(rest)
+                #     continue
 
-                # is there more all-caps words after caps init?
-                more_caps_w_re = regex.finditer(regices["caps_word"], caps_init_rest)
-                # Find the last one.
-                # https://stackoverflow.com/a/2988680
-                for last_caps_w in more_caps_w_re:
-                    # print(f"{off}:      {last_caps_w}")
-                    pass
-                if last_caps_w:
-                    more_caps = caps_init_start + caps_init_rest[:last_caps_w.span()[1]]
-                    more_caps_rest = caps_init_rest[last_caps_w.span()[1]:]
-                    # print_test(l, caps_init_start, more_caps, more_caps_rest, repr(last_caps_w))
-                    # print_test(l, more_caps, more_caps_rest)
-                    more_caps_w_re, last_caps_w = None, None
-                    # continue
+                # # is there more all-caps words after caps init?
+                # more_caps_w_re = regex.finditer(regices["caps_word"], caps_init_rest)
+                # # Find the last one.
+                # # https://stackoverflow.com/a/2988680
+                # for last_caps_w in more_caps_w_re:
+                #     # print(f"{off}:      {last_caps_w}")
+                #     pass
+                # if last_caps_w:
+                #     more_caps = caps_init_start + caps_init_rest[:last_caps_w.span()[1]]
+                #     more_caps_rest = caps_init_rest[last_caps_w.span()[1]:]
+                #     # print_test(l, caps_init_start, more_caps, more_caps_rest, repr(last_caps_w))
+                #     # print_test(l, more_caps, more_caps_rest)
+                #     more_caps_w_re, last_caps_w = None, None
+                #     # continue
 
                 # print_test(l, caps_init_start, caps_init_rest)
 
                 # if the rest is empty
-                # blank_rest_re = regex.match(regices["blank_line"], caps_init_rest)
-                blank_rest_re = regex.search(regices["blank_line_with_rubbish"], caps_init_rest)
-                if blank_rest_re:
-                    # print_test(l, caps_init_start, caps_init_rest)
+                # # blank_rest_re = regex.match(regices["blank_line"], caps_init_rest)
+                # blank_rest_re = regex.search(regices["blank_line_with_rubbish"], caps_init_rest)
+                # if blank_rest_re:
+                #     # print_test(l, caps_init_start, caps_init_rest)
 
                     # punct_re = regex.search(regices["trailing_punct"], caps_init_rest)
                     # regex always succeeds as just space will have been caught
                     # as a full caps line above
                     # punctless = caps_init_start[:punct_re.span()[0]]
                     # punct_rest = caps_init_start[punct_re.span()[0]:]
-                    # new_lines.append(punctless + ".\n")
-                    # print_test(l, punctless, punct_rest)
-                    continue
-                else:
-                    # print_test(l, caps_init_start, caps_init_rest)
-                    continue
+                    # # new_lines.append(punctless + ".\n")
+                    # # print_test(l, punctless, punct_rest)
+                    # continue
+                # else:
+                    # # print_test(l, caps_init_start, caps_init_rest)
+                    # continue
 
                 # print_test(l, caps_init_start, caps_init_rest)
                 # continue
 
-                # case: init caps ending with "."
-                dot_re = regex.search(regices["final_dot"], caps_init_start)
-                if dot_re:
-                    # print_test(l, caps_init_start, caps_init_rest)
-                    if regex.match(regices["M."], caps_init_start):
-                        # print_test(l, caps_init_start, caps_init_rest)
-                        continue
-                    else:
-                        # print_test(l, caps_init_start, caps_init_rest)
-                        continue
+                # # case: init caps ending with "."
+                # dot_re = regex.search(regices["final_dot"], caps_init_start)
+                # if dot_re:
+                #     # print_test(l, caps_init_start, caps_init_rest)
+                #     if regex.match(regices["M."], caps_init_start):
+                #         # print_test(l, caps_init_start, caps_init_rest)
+                #         continue
+                #     else:
+                #         # print_test(l, caps_init_start, caps_init_rest)
+                #         continue
 
                     # # append character + .
                     # pre_dot = l[:dot_re.span()[0]] + "."
@@ -217,23 +254,23 @@ def main():
                     #     pass
                     # continue
 
-                # case: caps char followed by ","
-                comma_re = regex.search(regices["final_comma"], caps_init_start)
-                if comma_re:
-                    continue
-                #     didasc_re = regex.match(regices["didasc_and_more"], caps_init_rest[1:])
-                #     if didasc_re:
-                #         didasc_end = didasc_re.span()[1]
-                #         new_lines.append(l[:caps_init_end_index+didasc_end+1] + "\n")
-                #         lll = caps_init_rest[1+didasc_end:]
-                #         blank_re = regex.match(regices["blank_line"], lll)
-                #         if not blank_re:
-                #             # print_test(l, l[:caps_init_end_index+didasc_end+1], lll)
-                #             new_lines.append(lll)
-                #             continue
-                #         else:
-                #             # print_test(l, l[:caps_init_end_index+didasc_end+1])
-                #             continue
+                # # case: caps char followed by ","
+                # comma_re = regex.search(regices["final_comma"], caps_init_start)
+                # if comma_re:
+                #     continue
+                # #     didasc_re = regex.match(regices["didasc_and_more"], caps_init_rest[1:])
+                # #     if didasc_re:
+                # #         didasc_end = didasc_re.span()[1]
+                # #         new_lines.append(l[:caps_init_end_index+didasc_end+1] + "\n")
+                # #         lll = caps_init_rest[1+didasc_end:]
+                # #         blank_re = regex.match(regices["blank_line"], lll)
+                # #         if not blank_re:
+                # #             # print_test(l, l[:caps_init_end_index+didasc_end+1], lll)
+                # #             new_lines.append(lll)
+                # #             continue
+                # #         else:
+                # #             # print_test(l, l[:caps_init_end_index+didasc_end+1])
+                # #             continue
 
                 # case: caps char followed by ":"
                 # colon_re = regex.match(regices["colon_and_more"], caps_init_rest)
@@ -368,10 +405,10 @@ def make_regices():
         "blank_line": regex.compile("^\s*$"),
         "blank_line_with_rubbish": regex.compile("^[\p{Z}\p{P}]*$"),
         "character": regex.compile(
-            "^\s*((les )*pe*rsonna *ge|dramatis personae|entreparleur|biographies|apparences|personrage|persongueules|pépersonâge)",
+            "^\s*((les )*pe*rsonna *ge|(les )*acteurs|dramatis personae|entreparleur|biographies|apparences|personrage|persongueules|pépersonâge)",
             regex.IGNORECASE,
         ),
-        "characters_block": regex.compile("\n*PERSONNAGES?.*?(\n\s*\n)+", regex.DOTALL),
+        "characters_block": regex.compile("\n*\s*PERSONNAGES?(.*?)(\n\s*\n)+", regex.DOTALL),
         "author": regex.compile("(^\s*de\s*$|^\(Auteur inconnu\))", regex.IGNORECASE),
         "fin": regex.compile("(fin|rideau|f1n|inachev|manque)", regex.IGNORECASE),
         # search for lines made of full caps + punct/space, as well as some
@@ -381,6 +418,7 @@ def make_regices():
         "annoying_init": regex.compile("^[\p{P}\p{Z}]*(M\.|\p{Lu}')\p{Z}*"),
         # words (with possible - or '), and space, with punctuation at the end
         "caps_init": regex.compile("^\s*(([\p{Lu}\p{Pc}\p{Pd}1]+\p{Zs}*)+)(\s*[\p{Po}]\s*)"),
+        "char_lc_dot_dash": regex.compile("^(\p{Z}*M*[\p{Ll}\p{Z}]+\.)\p{Z}*\p{Pd}+\p{Z}*(.*)$"),
         "caps_word": regex.compile("\p{Lu}{2,}"),
         "trailing_space": regex.compile("\s*$"),
         "trailing_punct": regex.compile("\s*[.,:]*\s+$"),
