@@ -2,435 +2,283 @@ import os
 import bs4
 import regex
 import shutil
-import zipfile
 from bs4 import BeautifulSoup
 
 
 def main():
-    txt_dir = "theatregratuit-txt"
-    if os.path.isdir(txt_dir):
-        fnames = [x for x in os.listdir(txt_dir) if ".txt" == os.path.splitext(x)[-1]]
-        n_files = len(fnames)
-        print(f"found {n_files} files in directory: {txt_dir}")
-    else:
-        print(
-            f"{txt_dir} directory not found, please run epub_to_txt.py first, and scrape.py if the epubs have not been downloaded"
-        )
-    separator_print()
 
-    tmp_dir = "tmp1"
-    if not os.path.isdir(tmp_dir):
-        os.mkdir(tmp_dir)
-
-    # ds_dir = "theatregratuit-dataset"
-    # if not os.path.isdir(ds_dir):
-    #     os.mkdir(ds_dir)
-
-    regices = make_regices()
     off = "\t"
 
-    # for later: instead load the full file and use regices?
-    # (especially as some files have multiple PERSONNAGES lists)
-    for i, fname in enumerate(fnames):
+    TXT_DIR = "theatregratuit-txt"
+    fnames, n_files = get_fnames(TXT_DIR)
 
-        print(f"{i:4}/{n_files} | {fname}")
+    # save trimmed files to dir
+    TRIM_DIR = "trimmed"
+    check_create_dir(TRIM_DIR)
 
-        with open(
-            os.path.join(txt_dir, fname), "r", encoding="utf-8", errors="ignore"
-        ) as f:
-            raw = f.read()
+    # if trimming already happened, just load the files
+    if len(os.listdir(TRIM_DIR)) == 0:
+        DATA = get_all_data(fnames, n_files, TXT_DIR, TRIM_DIR)
+    else:
+        DATA = get_all_data(fnames, n_files, TXT_DIR, TRIM_DIR, load=True)
 
-        # chars_block_it =  regex.finditer(regices["characters_block"], raw)
-        # found = 0
-        # blocks = []
-        # for chars_block in chars_block_it:
-        #     if chars_block:
-        #         found += 1
-        #         # annoying exceptions: when the regex catches an entire block of play
-        #         if len(chars_block.group(0)) < 6000:
-        #             raw = regex.sub(regex.escape(chars_block.group(0)), "", raw)
-        #             blocks.append(chars_block.group(0))
+    FORM_DIR = "formatted"
+    check_create_dir(FORM_DIR, clean=True)
 
-        # if found:
-        #     print(fname)
-        #     for b in blocks:
-        #         print(b)
-        #     print('-'*40)
-        #     print()
+    for i, (f, data) in enumerate(DATA.items()):
+        print(f"{i+1:4}/{n_files} | attempting formatting of: {TRIM_DIR}/{f}")
+        data = format_caps(data)
+        if "formatted" in data:
+            save_lines(f, data["formatted"], le_dir=FORM_DIR)
 
-        lines = raw.split('\n')
-        lines_len = len(lines)
+    separator_print()
+    underprint(f"first pass done: files with characters in caps | saved to {FORM_DIR}/")
 
-        char_index = find_characters(fname, lines, lines_len, regices, off)
+    REST_DIR = "rest"
+    check_create_dir(REST_DIR, clean=True)
 
-        # chars always come after author, no need to check for that if found
-        if char_index == 0:
-            author_index = find_author(fname, lines, lines_len, regices, off)
-        else:
-            author_index = char_index
-        # author_index = find_author(fname, lines, lines_len, regices, off)
+    UNFORMATTED = {}
+    for i, (f, data) in enumerate(DATA.items()):
+        if "unformatted" in data:
+            UNFORMATTED[f] = data
+    n_unf = len(UNFORMATTED.keys())
 
-        # end business
-        end_index = find_end(fname, lines, lines_len, regices, off)
+    for i, (f, data) in enumerate(UNFORMATTED.items()):
+        print(f"{i+1:4}/{n_unf} | writing: {REST_DIR}/{f}")
+        save_lines(f, data["unformatted"], le_dir=REST_DIR)
 
-        # print_file_stats(fname, i, n_files, char_index, author_index, end_index)
+    separator_print()
+    underprint(f"saved unformatted files to {REST_DIR}/")
 
-        ## checks
-        ##-------
-        ## neither char nor author found, check
-        # if author_index == 0:
-        #    print(f"{off}*** no characters nor author found")
-        #    print()
-        #    for l in lines[author_index : author_index + 10]:
-        #        print(f"{off}{l}", end="")
-        #    separator_print(offset=off)
-
-        # if end_index == lines_len - 1:
-        #    print(f"{off}*** no end found")
-        #    print()
-        #    for l in lines[end_index-3:]:
-        #        print(f"{off}{l}", end="") if '\n' in l else print(f"{off}{l}")
-        #    separator_print(offset=off)
-
-        # formatting & markers
-        # ---------------------
+    ds_dir = "theatregratuit-dataset"
+    if not os.path.isdir(ds_dir):
+        os.mkdir(ds_dir)
 
 
-        # trimmed = ''.join(lines[author_index:end_index]).strip()
-        # if regex.search(regices["dash"], trimmed):
-        #     with open(os.path.join(tmp_dirs[0], fname), 'w') as o:
-        #         o.write(regex.sub(regices["dash"], ".\n", trimmed))
-        # else:
-        #     with open(os.path.join(tmp_dirs[1], fname), 'w') as o:
-        #         o.write(trimmed)
+#----------------------------------------
+# Formatting
 
-        new_lines = []
-        for j, l in enumerate(lines[author_index:end_index]):
+def format_caps(data):
 
-            # remove end trailing space, replace multiple annoying spaces by one
-            l =  l.strip() + "\n"
-            l = regex.sub(regices["non_breaking_space"], " ", l)
-
-            # check for full caps line
-            caps_full_re = regex.match(regices["caps_full"], l)
-            if caps_full_re:
-                # check for final punctuation (should always succeed)
-                trail_re = regex.search(regices["trailing_punct"], l)
-                if trail_re:
-                    new_l = l[:trail_re.span()[0]] + ".\n"
-                    # print_test(l, new_l)
-                    new_lines.append("<|e|>\n")
-                    new_lines.append("<|s|>\n")
-                    new_lines.append(new_l)
-                continue
-
-            # check for initial series of caps words (characters)
-            caps_init_re = regex.match(regices["caps_init"], l)
-            # check for annoying beginnings (M. , or L' )
-            annoying_re = regex.match(regices["annoying_init"], l)
-            if annoying_re:
-                caps_init_re = regex.match(regices["caps_init"], l[annoying_re.span()[1]:])
+    formatted = ["<|s|>"]
 
 
-            # if a character in caps detected at beginning of line
-            if caps_init_re:
+    if data["fname"] in ("count-1004248-LARTICLE_330_-_Georges_Courteline.txt",
+                         "count-1004275-LIMPROMPTU_DE_VERSAILLES_-_Moliere.txt",
+                         "count-1004244-LIOLA_-_Luigi_Pirandello.txt",
+                         "count-1004282-MAGDA_EST_LA_ET_NEST_PAS_LA_-_Jean_Sibil.txt",
+                         "count-1029795-HOTEL_DU_LIBRE-ECHANGE_II_-_Jean_Sibil.txt",
+                         "count-1045935-Le_Pendu_-_Charles_Cros.txt ",
+                         "count-1045947-Lhomme_propre_-_Charles_Cros.txt",
+                         "count-1072551-dodutt.txt",
+                         "count-1396213-Roberto_Succo.txt",
+                         "count-1470266-LElecteur.txt",
+                         "count-1470267-SUZANNE_ET_LES_VENERABLES.txt ",
+                         "count-1045935-Le_Pendu_-_Charles_Cros.txt ",
+                         "count-1470267-SUZANNE_ET_LES_VENERABLES.txt",
+                        ):
+        formatted.extend(data["trimmed"])
+        # add very end markers, trim lines
+        formatted = markers_final_cleanup(formatted)
+        data["unformatted"] = formatted
+        return data
 
-                caps_init_end_index = caps_init_re.span()[1]
-                caps_init_start = l[:caps_init_end_index]
-                caps_init_rest = l[caps_init_end_index:]
+    # skip first match, so that entire start of text caught in one extract
+    # (adding <|s|> at the very top of file after the loop)
+    skipped = False
 
-                new_lines.append("<|e|>\n")
-                new_lines.append("<|s|>\n")
-                new_lines.append(l)
-                continue
+    for j, l in enumerate(data["trimmed"]):
 
-            char_lc_dot_dash_re = regex.match(regices["char_lc_dot_dash"], l)
-
-            if char_lc_dot_dash_re:
-                new_lines.append("<|e|>\n")
-                new_lines.append("<|s|>\n")
-                char = char_lc_dot_dash_re.group(1) + "\n"
-                rest = char_lc_dot_dash_re.group(2) + "\n"
-                new_lines.append(char.upper())
-                new_lines.append(rest)
-                continue
+        # remove footnote calls (digit)
+        l = regex.sub(R["(footnote)"], "", l)
 
 
-            new_lines.append(l)
+        # ------------------------------------------------------------------------
+        # FAT MAJORITY: CAPS
+
+        # check for full caps line
+        caps_line = regex.match(R["LINE"], l)
+        if caps_line and not regex.match(R["WORD_INIT"], formatted[-1]):
+            formatted, skipped = append_markers(formatted, skipped)
+            l = regex.sub(R["trailing_punct"], "", l) + "."
+            formatted.append(l)
+            continue
+
+        # init capital letters word
+        word_init = regex.match(R["WORD_INIT"], l)
+        # check that previous line is not already with full caps
+        if word_init:
+
+            rest = l[word_init.span()[1]:]
+
+            # is there a dot'n'dash straight away?
+            dot_n_dash = regex.match(R["dot_n_dash"], rest)
+            cont, formatted, skipped = append_splits(formatted, R["dot_n_dash"], l, rest,
+                                                     skipped, word_init.span()[1])
+            if cont: continue
+
+            # is there a colon straight away?
+            cont, formatted, skipped = append_splits(formatted, R["colon"], l, rest,
+                                                     skipped, word_init.span()[1])
+            if cont: continue
+
+            # get all caps words on the line, and check the last one,
+            # find the last one (https://stackoverflow.com/a/2988680)
+            more_caps_words = regex.finditer(R["WORD"], l)
+            last_caps_word = None
+            for last_caps_word in more_caps_words: pass
+            if last_caps_word:
+
+                rest = l[last_caps_word.span()[1]:]
+
+                if rest:
+
+                    # check for colon
+                    cont, formatted, skipped = append_splits(formatted, R["colon"], l, rest,
+                                                             skipped, last_caps_word.span()[1])
+                    if cont: continue
+
+                    # check for comma and dash
+                    cont, formatted, skipped = append_splits(formatted, R["comma_dash"], l, rest,
+                                                             skipped, last_caps_word.span()[1])
+                    if cont: continue
+
+                    # check for didascalia: find colon later
+                    cont, formatted, skipped = append_splits(formatted, R["colon"], l, rest,
+                                                             skipped, last_caps_word.span()[1],
+                                                             search=True)
+                    if cont: continue
+
+                    # check for didascalia: find either dot or dot'n'dash later
+                    cont, formatted, skipped = append_splits(formatted, R["dot_opt_dash"], l, rest,
+                                                             skipped, last_caps_word.span()[1],
+                                                             search=True)
+                    if cont: continue
+
+                else:
+
+                    formatted, skipped = append_markers(formatted, skipped)
+                    formatted.append(l[:last_caps_word.span()[1]] + ".")
+                    continue
+
+            more_caps_words, last_caps_word = None, None # needs reset
 
 
-        new_lines.append("<|e|>")
+        # otherwise just append the line
+        formatted.append(l)
 
-        with open(os.path.join(tmp_dir, fname), 'w') as o:
-            o.writelines(new_lines)
+    # add very end markers, trim lines
+    formatted = markers_final_cleanup(formatted)
 
-                # print_test(l, caps_init_start, caps_init_rest)
-                # continue
+    # save lines
+    if not skipped:
+        data["unformatted"] = formatted
+    else:
+        data["formatted"] = formatted
 
-                # # is there a dash on the line?
-                # dash_re = regex.match(regices["dash_and_more"], caps_init_rest)
-                # if dash_re:
-                #     end_dash = dash_re.span()[1]
-                #     dashless = caps_init_start + dash_re.group(1) + "."
-                #     rest = caps_init_rest[end_dash:]
-                #     # print_test(l, dashless, rest)
-                #     new_lines.append(dashless + "\n")
-                #     new_lines.append(rest)
-                #     continue
+    return data
 
-                # is there a colon on the line?
-                # colon_re = regex.match(regices["colon_and_more"], caps_init_rest)
-                # if colon_re:
-                #     end_colon = colon_re.span()[1]
-                #     colonless = caps_init_start + colon_re.group(1) + "."
-                #     rest = caps_init_rest[end_colon:]
-                #     # print_test(l, caps_init_start, caps_init_rest)
-                #     # print_test(l, colonless, rest, utf=False)
-                #     new_lines.append(colonless + "\n")
-                #     new_lines.append(rest)
-                #     continue
 
-                # # is there more all-caps words after caps init?
-                # more_caps_w_re = regex.finditer(regices["caps_word"], caps_init_rest)
-                # # Find the last one.
-                # # https://stackoverflow.com/a/2988680
-                # for last_caps_w in more_caps_w_re:
-                #     # print(f"{off}:      {last_caps_w}")
-                #     pass
-                # if last_caps_w:
-                #     more_caps = caps_init_start + caps_init_rest[:last_caps_w.span()[1]]
-                #     more_caps_rest = caps_init_rest[last_caps_w.span()[1]:]
-                #     # print_test(l, caps_init_start, more_caps, more_caps_rest, repr(last_caps_w))
-                #     # print_test(l, more_caps, more_caps_rest)
-                #     more_caps_w_re, last_caps_w = None, None
-                #     # continue
+def append_splits(formatted, reg, l, rest, skipped, end_ind, search=False):
+    if search:
+        reg_re = regex.search(reg, rest)
+    else:
+        reg_re = regex.match(reg, rest)
+    if reg_re:
+        formatted, skipped = append_markers(formatted, skipped)
+        if search: # end of prefix just after didascalia, before boundary punctuation
+            end_ind += reg_re.span()[0]
+        start = l[:end_ind] + "."
+        formatted.append(start)
+        formatted = check_append(formatted, rest[reg_re.span()[1]:])
+        return True, formatted, skipped
+    else:
+        return False, formatted, skipped
 
-                # print_test(l, caps_init_start, caps_init_rest)
 
-                # if the rest is empty
-                # # blank_rest_re = regex.match(regices["blank_line"], caps_init_rest)
-                # blank_rest_re = regex.search(regices["blank_line_with_rubbish"], caps_init_rest)
-                # if blank_rest_re:
-                #     # print_test(l, caps_init_start, caps_init_rest)
+def append_markers(lines, skipped):
+    """will append markers, and turn skipped to true"""
+    if skipped and not regex.search(R["WORD_INIT"], lines[-1]):
+        lines.append("<|e|>")
+        lines.append("<|s|>")
+    return lines, True
 
-                    # punct_re = regex.search(regices["trailing_punct"], caps_init_rest)
-                    # regex always succeeds as just space will have been caught
-                    # as a full caps line above
-                    # punctless = caps_init_start[:punct_re.span()[0]]
-                    # punct_rest = caps_init_start[punct_re.span()[0]:]
-                    # # new_lines.append(punctless + ".\n")
-                    # # print_test(l, punctless, punct_rest)
-                    # continue
-                # else:
-                    # # print_test(l, caps_init_start, caps_init_rest)
-                    # continue
 
-                # print_test(l, caps_init_start, caps_init_rest)
-                # continue
+def check_append(lines, bit):
+    if bit:
+        lines.append(bit)
+    return lines
 
-                # # case: init caps ending with "."
-                # dot_re = regex.search(regices["final_dot"], caps_init_start)
-                # if dot_re:
-                #     # print_test(l, caps_init_start, caps_init_rest)
-                #     if regex.match(regices["M."], caps_init_start):
-                #         # print_test(l, caps_init_start, caps_init_rest)
-                #         continue
-                #     else:
-                #         # print_test(l, caps_init_start, caps_init_rest)
-                #         continue
 
-                    # # append character + .
-                    # pre_dot = l[:dot_re.span()[0]] + "."
-                    # # print_test(l, pre_dot, post_dot)
-                    # new_lines.append(pre_dot)
-                    # rest_re = regex.match(regices["blank_line"], caps_init_rest[dot_re.span()[1]:])
-                    # # if not blank after check for dash
-                    # if not rest_re:
-                    #     post_dot = caps_init_rest[dot_re.span()[1]:]
-                    #     # print_test(l, pre_dot, post_dot)
-                    #     new_lines.append(post_dot)
-                    # else:
-                    #     # print_test(l, post_dot)
-                    #     pass
-                    # continue
+def markers_final_cleanup(lines):
+    lines = remove_trailing_lines(lines)
+    lines.append("<|e|>")
+    return lines
 
-                # # case: caps char followed by ","
-                # comma_re = regex.search(regices["final_comma"], caps_init_start)
-                # if comma_re:
-                #     continue
-                # #     didasc_re = regex.match(regices["didasc_and_more"], caps_init_rest[1:])
-                # #     if didasc_re:
-                # #         didasc_end = didasc_re.span()[1]
-                # #         new_lines.append(l[:caps_init_end_index+didasc_end+1] + "\n")
-                # #         lll = caps_init_rest[1+didasc_end:]
-                # #         blank_re = regex.match(regices["blank_line"], lll)
-                # #         if not blank_re:
-                # #             # print_test(l, l[:caps_init_end_index+didasc_end+1], lll)
-                # #             new_lines.append(lll)
-                # #             continue
-                # #         else:
-                # #             # print_test(l, l[:caps_init_end_index+didasc_end+1])
-                # #             continue
 
-                # case: caps char followed by ":"
-                # colon_re = regex.match(regices["colon_and_more"], caps_init_rest)
-                # if colon_re:
-                #     end_colon = colon_re.span()[1]
-                #     colonless = caps_init_start + colon_re.group(1) + "."
-                #     rest = caps_init_rest[end_colon:]
-                #     print_test(l, colonless, rest)
-                #     new_lines.append(colonless + "\n")
-                #     new_lines.append(rest)
-                #     continue
+def remove_trailing_lines(lines):
+    if regex.match(R["blank_line"], lines[-1]):
+        for i, l in enumerate(reversed(lines)):
+            if not regex.match(R["blank_line"], l):
+                return lines[:-i]
+    else:
+        return lines
 
-                # else:
-                #     continue
-
-                # # check for comma and more (other char, didascalia)
-                # n = regex.match(regices["didasc_and_more"], caps_init_rest)
-                # if n:
-                #     end_n = n.span()[1]
-                #     lll = caps_init_rest[end_n:]
-
-                    # if lll:
-                    #     print_file_stats(fname, i, n_files, char_index, author_index, end_index)
-                    #     print(f"{off}old:  {l}", end="")
-                    #     print(f"{off}new:  {l[:caps_init_end_index+end_n]}")
-                    #     print(f"{off}rest: {lll}", end="")
-                    #     print()
-                    # continue
-                # else:
-                    # print_file_stats(fname, i, n_files, char_index, author_index, end_index)
-                    # print(f"{off}old:  {l}", end="")
-                    # print(f"{off}new:  {caps_init_start}")
-                    # print(f"{off}rest: {caps_init_rest}", end="")
-                    # print()
-                    # continue
-
-                # case: dot
-                # case: comma
-
-            # else:
-            #     continue
-
-            # m = regex.match(regices["char_no_dot"], l)
-            # if m:
-            #     replaced = True
-            #     new_l = m.group(1) + ".\n"
-            #     new_lines.append(new_l)
-            #     # print(f"{off}old: {l}", end="")
-            #     # print(f"{off}new: {new_l}", end="")
-            #     # print()
-            #     continue
-
-            # m = regex.match(regices["char_dash"], l)
-            # if m:
-            #     replaced = True
-            #     new_l = m.group(1) + ".\n"
-            #     rest_l = l[m.span()[1] :]
-            #     new_lines.append(new_l)
-            #     # print(f"{off}old:  {l}", end="")
-            #     # print(f"{off}new:  {new_l}", end="")
-            #     if rest_l:
-            #         # print(f"{off}rest: {rest_l}", end="")
-            #         new_lines.append(rest_l)
-            #     # print()
-            #     continue
-
-            # m = regex.match(regices["char_comma_dash"], l)
-            # if m:
-            #     replaced = True
-            #     new_l = m.group(1) + ".\n"
-            #     rest_l = l[m.span()[1] :]
-            #     new_lines.append(new_l)
-            #     # print(f"{off}old:  {l}", end="")
-            #     # print(f"{off}new:  {new_l}", end="")
-            #     if rest_l:
-            #         # print(f"{off}rest: {rest_l}", end="")
-            #         new_lines.append(rest_l)
-            #     # print()
-            #     continue
-
-            # m = regex.match(regices["char_colon"], l)
-            # if m:
-            #     replaced = True
-            #     new_l = m.group(1) + ".\n"
-            #     new_lines.append(new_l)
-
-                # print_file_stats(fname, i, n_files, char_index, author_index, end_index)
-                # print(f"{off}old: {l}", end="")
-                # print(f"{off}new: {new_l}", end="")
-                # print()
-
-                # continue
-
-            # m = regex.match(regices["char_comma_dash"], l)
-            # if m:
-            #     replaced = True
-            #     new_l = m.group(1) + ".\n"
-            #     rest_l = l[m.span()[1] :]
-            #     new_lines.append(new_l)
-            #     # print(f"{off}old:  {l}", end="")
-            #     # print(f"{off}new:  {new_l}", end="")
-            #     if rest_l:
-            #         # print(f"{off}rest: {rest_l}", end="")
-            #         new_lines.append(rest_l)
-            #     # print()
-            #     continue
-
-            # m = regex.match(regices["char_dot_more"], l)
-            # if m:
-            #     replaced = True
-            #     new_l = m.group(1) + "\n"
-            #     rest_l = l[m.span()[1] :]
-            #     new_lines.append(new_l)
-            #     print(f"{off}old:  {l}", end="")
-            #     print(f"{off}new:  {new_l}", end="")
-            #     if rest_l:
-            #         print(f"{off}rest: {rest_l}", end="")
-            #         new_lines.append(rest_l)
-            #     print()
-            #     continue
-
-            # new_lines.append(l)
-
-        # separator_print(offset=off)
-
-    # for tmp_dir in tmp_dirs:
-    #     shutil.rmtree(tmp_dir)
+# ---------------------------------------
+# Les Regices
 
 
 def make_regices():
     return {
         "blank_line": regex.compile("^\s*$"),
         "blank_line_with_rubbish": regex.compile("^[\p{Z}\p{P}]*$"),
+        # trim beginning & end of files
+        # -----------------------------
         "character": regex.compile(
-            "^\s*((les )*pe*rsonna *ge|(les )*acteurs|dramatis personae|entreparleur|biographies|apparences|personrage|persongueules|pépersonâge)",
+            "^((les\s*)*pe*rsonna *ge|(les)*acteurs|dramatis personae|avertissement|entreparleur|biographies|apparences|personrage|persongueules|pépersonâge)",
             regex.IGNORECASE,
         ),
-        "characters_block": regex.compile("\n*\s*PERSONNAGES?(.*?)(\n\s*\n)+", regex.DOTALL),
-        "author": regex.compile("(^\s*de\s*$|^\(Auteur inconnu\))", regex.IGNORECASE),
+        "author": regex.compile("^de$", regex.IGNORECASE),
+        "additional_author": regex.compile(
+            "^(\(Auteur inconnu\)|"
+            + "Voltaire|"
+            + "de\s+Georges Courteline|"
+            + "Translation en prose de Jean Sibil|"
+            + "Anton Pavlovitch Tchekhov|"
+            + "EUGENE LABICHE, A. LEFRANC et MARC-MICHEL|"
+            + "Alexandre Hardy)$"
+        ),
+        "la_scene": regex.compile("^La scène"),
         "fin": regex.compile("(fin|rideau|f1n|inachev|manque)", regex.IGNORECASE),
         # search for lines made of full caps + punct/space, as well as some
         # very common words listing characters, and didascalia in ()
-        "caps_full": regex.compile("^\s*((\p{Lu}+|seule?|puis|puis tout le monde|moins|et)\s*[.’'<>;,]*\s*)+\s*(\(.*?\))*\s*$"),
+        "LINE": regex.compile(
+            "^((\p{Lu}+|seule?|puis|puis tout le monde|moins|et)[\p{Z}\p{P}]*)+\p{Z}*"
+            + "(\(.*?\))*\p{Z}*$"
+        ),
+        "(line)": regex.compile("^\(.*\)$"),
         # common annoying starts "M.", "L'"
         "annoying_init": regex.compile("^[\p{P}\p{Z}]*(M\.|\p{Lu}')\p{Z}*"),
         # words (with possible - or '), and space, with punctuation at the end
-        "caps_init": regex.compile("^\s*(([\p{Lu}\p{Pc}\p{Pd}1]+\p{Zs}*)+)(\s*[\p{Po}]\s*)"),
-        "char_lc_dot_dash": regex.compile("^(\p{Z}*M*[\p{Ll}\p{Z}]+\.)\p{Z}*\p{Pd}+\p{Z}*(.*)$"),
-        "caps_word": regex.compile("\p{Lu}{2,}"),
-        "trailing_space": regex.compile("\s*$"),
-        "trailing_punct": regex.compile("\s*[.,:]*\s+$"),
-        "non_breaking_space": regex.compile(" {2,}"), # non-breaking space
-        "M." : regex.compile("M.\s"),
-        "dot": regex.compile("\s*\.\s*"),
+        "caps_init": regex.compile(
+            "^\s*(([\p{Lu}\p{Pc}\p{Pd}1]+\p{Zs}*)+)(\s*[\p{Po}]\s*)"
+        ),
+        "char_lc_dot_dash": regex.compile(
+            "^(\p{Z}*M*[\p{Ll}\p{Z}]+\.)\p{Z}*\p{Pd}+\p{Z}*(.*)$"
+        ),
+        "trailing_space": regex.compile("\p{Z}*$"),
+        "trailing_punct": regex.compile("[\p{Z}\p{P}]*$"),
+        "non_breaking_space": regex.compile(" {2,}"),  # non-breaking space
+        ".": regex.compile("\p{Z}*\.\p{Z}"),
+        ",": regex.compile("\p{Z}*,\p{Z}*"),
         "final_dot": regex.compile("\s*\.\s*$"),
         "final_comma": regex.compile(",$"),
         # include rare errors like ".-—Blah" or ". -— Blah"
-        "dash": regex.compile("[,.](\s*[-–—]+|-[–—])\s*"),
+        "dot_n_dash": regex.compile("\p{Z}*[,.]\p{Z}*\p{Pd}+\p{Z}*"),
+        "dot_opt_dash": regex.compile("\p{Z}*\.\p{Z}*\p{Pd}*\p{Z}*"),
+        "comma_dash": regex.compile("\p{Z}*,\p{Z}*\p{Pd}\p{Z}*"),
+        "colon": regex.compile("\p{Z}*:\p{Z}*"),
         "dash_and_more": regex.compile("(.*?)[.;:,]*\s*-*[-–—]\s*"),
-        "colon": regex.compile("\s*:\s*"),
         "colon_and_more": regex.compile("(.*?)\s*:\s*"),
         "didasc_and_more": regex.compile(".*?(?<!M)[.:]\s*"),
         # "char_no_dot": regex.compile("^\s*([A-Z1'-]+)\s*$"),
@@ -439,97 +287,275 @@ def make_regices():
         # "char_comma_dash": regex.compile("^\s*([A-Z1'-]{2,},.*?)\.[\s-]+[–—]\s"),
         # "char_dot_more": regex.compile("^\s*([A-Z1'-]{2,}\.)(.*)$"),
         # "char_no_dot_more": regex.compile("^\s*([A-Z1'-]{2,})(.*)$"),
-        # "char_colon": regex.compile("^\s*([A-Z1'-]{2,})\s*:\s*$"),
+        "WORD": regex.compile("\p{Lu}{2,}"),
+        "WORD_INIT": regex.compile("^(?:\p{Lu}[.']\p{Z}*)*[\p{Lu}\p{Pd}]{2,}"),
+        "CHAR_ONELINE": regex.compile("^\p{Lu}+[\p{Z}\p{P}]*$"),
+        "CHAR_ONELINE_DOT": regex.compile("^\p{Lu}+\p{Z}*\.\p{Z}*$"),
+        "CHAR_ONELINE_COLON": regex.compile("^\p{Lu}+\p{Z}*:\p{Z}*$"),
+        "INIT_char_DOT_n_DASH": regex.compile("^\p{L}+\.\p{Z}+\p{Pd}"),
+        "INIT_char_COLON": regex.compile("^\p{L}+\p{Z}+:"),
+        "INIT_CHAR_DOT_N_DASH": regex.compile("^\p{Lu}+\.\p{Z}+\p{Pd}"),
+        "INIT_CHAR_COLON": regex.compile("^\p{Lu}+\p{Z}+:"),
+        "init_char_dot_n_dash": regex.compile("^\p{Lu}+\p{Ll}+\.\p{Z}+\p{Pd}"),
+        "init_char_colon": regex.compile("^(\p{Lu}\p{Ll}+)\p{Z}*:\p{Z}*"),
+        "init_char_dash_nodot": regex.compile(
+            "^(\p{Lu}['.]\p{Z}*)*[\p{Lu}\p{Z}]+\(.*?\)*\p{Z}*—"
+        ),
+        # single file with "A. or B. as characters: count-3202657-De_la_liberte.txt"
+        "LETTER_CHARS": regex.compile("^(\p{Lu}\.)\p{Z}\p{Pd}\p{Z}"),
+        # regices for innards cleaning
+        # ----------------------------
+        # letters & space, possibly a parenthesis, : or — at the end
+        "char_colon_or_dash": regex.compile(
+            "^((?:\p{Lu}[,']\p{Z}*)*"
+            + "[\p{L}\p{Pd}\p{Z}]+)"
+            + "(\p{Z}\(.*?\))*"
+            + "\p{Z}[:—]\p{Z}"
+        ),
+        # letters & space, possibly a parenthesis, : or — at the end
+        "char_colon_or_dash_paren": regex.compile(
+            "^((?:\p{Lu}[,']\p{Z}*)*"
+            + "[\p{L}\p{Pd}\p{Z}]+)"
+            + "(\p{Z}\(.*?\))*"
+            + "\p{Z}[:—]\p{Z}"
+        ),
+        # lower case character, optionally with didasc, ending in dot and dash,
+        "char_lc_dot_dash": regex.compile(
+            "^([\p{Ll}\p{Z}]+)" + "(([,\p{Z}].*?)*)" + "\.\p{Z}*\p{Pd}\p{Z}*"
+        ),
+        # char (with numbers & spaces) followed or not by :
+        "char_oneline_colon": regex.compile("^((L')*[\p{L}\p{N}\p{Z}]+?)\p{Z}*:$"),
+        "char_colon": regex.compile("^(\p{L}{2,})\p{Z}*:\p{Z}*"),
         # "char_colon_more": regex.compile("^\s*([A-Z1'-]{2,})\s*:\s*(.*)$"),
+        # line cleanup
+        "(footnote)": regex.compile("\(\d+\)"),
+        "sc_ene": regex.compile("SC\p{Z}+[EÈ]NE", regex.IGNORECASE),
+        "deuxi_eme": regex.compile("DEUXI\p{Z}ÈME", regex.IGNORECASE),
     }
 
 
-def find_end(fname, lines, lines_len, regices, off):
-    end_index = lines_len - 1
-    found_end = False
-    for j, l in enumerate(reversed(lines[-4:])):
-
-        if found_end:
+def index_of_regex_match(lines, r, trim=True):
+    lines_len = len(lines)
+    ind = 0
+    found = False
+    for i,l in enumerate(lines):
+        if found: break
+        if regex.search(r, l):
+            found = True
+            k = 1
+            if trim:
+                while i + k < lines_len and \
+                 regex.match(R["blank_line"], lines[i + k]):
+                    k += 1
+            ind = i + k
             break
+    return ind
 
-        if regex.search(regices["fin"], l):
-            found_end = True
-            end_index = end_index - j - 1
+# ----------------------------------------
+# data pipelines
 
-    return end_index
+def get_all_data(fnames, n_files, txt_dir, trim_dir, load=False):
+    D = {}
+    for i, f in enumerate(fnames):
+        if load:
+            print(f"{i+1:4}/{n_files} | loading: {trim_dir}/{f}")
+            D[f] = get_data(f, le_dir=txt_dir, trim=True, trim_dir=trim_dir)
+        else:
+            print(f"{i+1:4}/{n_files} | trimming & writing: {txt_dir}/{f}")
+            D[f] = get_data(f, le_dir=txt_dir)
+            save_lines(f, D[f]["trimmed"], le_dir=trim_dir)
+    separator_print()
+    if load:
+        underprint(f"finished loading from {trim_dir}/")
+    else:
+        underprint(f"finished loading from {txt_dir} & trimming saved to {trim_dir}/")
+    return D
+
+def get_data(f, le_dir, trim=True, trim_dir="trimmed"):
+    raw, lines, lines_len = get_lines(f, le_dir=le_dir)
+    data = {
+        "fname": f,
+        "raw": raw,
+        "lines": lines,
+        "lines_len": lines_len,
+    }
+    if trim:
+        trimmed, indices = trim_lines(f, lines, lines_len)
+        trimmed_len = len(trimmed)
+        data.update({"trimmed": trimmed,
+                     "trimmed_len": trimmed_len})
+        data.update(indices)
+    else:
+        _, trimmed, trimmed_len = get_lines(f, le_dir=trim_dir)
+        data.update({"trimmed": trimmed,
+                     "trimmed_len": trimmed_len})
+    return data
 
 
-def find_author(fname, lines, lines_len, regices, off):
+def trim_lines(fname, lines, lines_len):
+    author_index = find_author(fname, lines, lines_len)
+    if not author_index:
+        author_index = index_of_regex_match(lines, R["additional_author"])
+    char_index = find_characters(fname, lines, lines_len)
+    end_index = find_end(fname, lines, lines_len)
+    start_index = max(author_index, char_index)
+    return (
+        lines[start_index:end_index],
+        {
+            "char_index": char_index,
+            "author_index": author_index,
+            "end_index": end_index,
+            "start_index": start_index,
+        },
+    )
+
+
+# ----------------------------------------
+# trimming character, author, end
+
+
+def find_characters(fname, lines, lines_len):
+    feydeau = False  # almost all Feydeau files have 2-3 blocks of char
+    vega = False  # Vega files can be cut up to line "La scène..."
+
+    char_index = 0
+    found_char = False
+    limit = 15
+
+    if fname in (
+        "count-1537913-LES_ESPAGNOLS_EN_DANEMARK.txt",
+        "count-1712853-LE_VERITABLE_SAINT_GENEST.txt",
+        "count-3263112-LA_MORT_DE_WALLENSTEIN.txt",
+        "count-2267304-LAmour_medecin.txt",
+        "count-2037607-LHabit_vert.txt",
+        "count-2158361-ANDROMEDE.txt",
+        "count-3109664-SYLVANIRE.txt" "count-3397657-LA_VEINE.txt",
+        "count-2047890-LE_ROI.txt",
+        "count-3031455-Nono.txt",
+    ):
+        feydeau = True
+
+    # have a long prologue
+    if fname in ("count-1355612-UNE_FEMME_EST_UN_DIABLE.txt"):
+        limit = 27
+
+    for j, l in enumerate(lines[:limit]):
+        if found_char:
+            break
+        if "Feydeau" in l and fname not in (
+            "count-2199212-Les_Paves_de_lours.txt",
+            "count-2316496-On_va_faire_la_cocotte.txt",
+        ):
+            feydeau = True
+        if "Lope de Vega" in l:
+            vega = True
+        if regex.match(R["character"], l):
+            found_char = True
+            k = 1
+            # files with space after char > k + 1
+            if fname in (
+                "count-1072543-CornPR.txt" "count-2158361-ANDROMEDE.txt",
+                "count-2037607-LHabit_vert.txt",
+                "count-1182649-LE_MONDE_OU_L.txt",
+                "count-958980-Le_gendre_de_Monsieur_Poirier_-_Emile_Augier.txt",
+                "count-1037209-LES_MAMELLES_DE_TIRESIAS_-_Guillaume_Apollinaire.txt",
+            ):
+                k += 1
+            # more annoying exceptions
+            if fname in ("count-959005-LOrphelin_de_la_Chine_-_Voltaire.txt",):
+                # find init caps words only, no space (lest we go to the end)
+                while j + k < lines_len and regex.match(R["WORD"], lines[j + k]):
+                    k += 1
+            elif vega:
+                # all vega can go up to "La scène"
+                while j + k < lines_len and not regex.match(
+                    R["la_scene"], lines[j + k]
+                ):
+                    k += 1
+            else:
+                k = end_of_block_and_trim(lines, lines_len, j, k)
+                # annoying exceptions: more chars after blank line
+                if feydeau:
+                    k = end_of_block_and_trim(lines, lines_len, j, k)
+                    # some files like Feydeau with three !
+                    if fname in (
+                        "count-1537913-LES_ESPAGNOLS_EN_DANEMARK.txt",
+                        "count-3263112-LA_MORT_DE_WALLENSTEIN.txt",
+                        "count-2267304-LAmour_medecin.txt",
+                        "count-3397657-LA_VEINE.txt",
+                    ):
+                        k = end_of_block_and_trim(lines, lines_len, j, k)
+            char_index = j + k
+    return char_index
+
+
+def end_of_block_and_trim(lines, lines_len, j, k):
+    # find end of block
+    while j + k < lines_len and not regex.match(R["blank_line"], lines[j + k]):
+        k += 1
+    # trim empty lines
+    while j + k < lines_len and regex.match(R["blank_line"], lines[j + k]):
+        k += 1
+    return k
+
+
+def find_author(fname, lines, lines_len):
     author_index = 0
     found_author = False
     for j, l in enumerate(lines[:10]):
-
         if found_author:
             break
-
-        if regex.match(regices["author"], lines[j]):
+        if regex.match(R["author"], lines[j]):
             found_author = True
-            k = 2  # we assume "de\n\nauthor"
-            while j + k < lines_len and not regex.match(
-                regices["blank_line"], lines[j + k]
+            # annoying exceptions
+            if fname in (
+                "count-1049195-Arret_36_de_lautobus_40_-_Jean_Sibil.txt",
+                "count-1396213-Roberto_Succo.txt",
             ):
-                k += 1
+                k = 1
+            elif fname == "count-1541294-Olaf_loriginal.txt":
+                k = 2
+            else:
+                k = 2  # we assume "de\n\nauthor"
+                while j + k < lines_len and not regex.match(
+                    R["blank_line"], lines[j + k]
+                ):
+                    k += 1
             author_index = j + k + 1
-
     return author_index
 
 
-def find_characters(fname, lines, lines_len, regices, off):
-    char_index = 0
-    found_char = False
-    for j, l in enumerate(lines):
-
-        if found_char:
+def find_end(fname, lines, lines_len):
+    end_index = lines_len - 1
+    found_end = False
+    for j, l in enumerate(reversed(lines[-4:])):
+        if found_end:
             break
+        if regex.search(R["fin"], l):
+            found_end = True
+            end_index = end_index - j - 1
+    return end_index
 
-        if regex.match(regices["character"], l):
 
-            # print(f"{off}found character list in file: {fname}")
-            # print()
-            # print(f"{off}{l}")
+# ----------------------------------------
+# printing
 
-            found_char = True
-            k = 1
-            while j + k < lines_len and not regex.match(
-                regices["blank_line"], lines[j + k]
-            ):
-                k += 1
-
-            char_index = j + k + 1
-
-            # for ll in lines[j+1:j+k+1]:
-            #     print(f"{off}{ll}", end="")
-            # separator_print(offset=off)
-            # print()
-
-        # if not found_char:
-        #     print(f"{off}nothing in: {fname}")
-        #     print()
-        #     for j, l in enumerate(lines):
-        #         if j > 10:
-        #             break
-        #         print(f"{off}{l}", end="")
-        #     separator_print(offset=off)
-        #     print()
-
-    return char_index
 
 def print_test(*args, utf=True, off="\t"):
     for i, arg in enumerate(args):
-        if utf: arg_utf8 = arg.encode('utf-8')
-        if '\n' in arg:
+        if utf:
+            arg_utf8 = arg.encode("utf-8")
+        if "\n" in arg:
             print(f"{off}{i}  {arg}", end="")
-            if utf: print(f"{off}{i}  {arg_utf8}")
+            if utf:
+                print(f"{off}{i}  {arg_utf8}")
         else:
             print(f"{off}{i}  {arg}")
-            if utf: print(f"{off}{i}  {arg_utf8}")
-    print(off + "-"*40)
+            if utf:
+                print(f"{off}{i}  {arg_utf8}")
+    print(off + "-" * 40)
     print()
+
 
 def print_file_stats(fname, i, n_files, char_index, author_index, end_index):
     print(f"file:     {fname}")
@@ -539,6 +565,11 @@ def print_file_stats(fname, i, n_files, char_index, author_index, end_index):
     print(f"end:      {end_index}")
     print()
 
+
+def print_lines(lines):
+    print('\n'.join(lines))
+
+
 def separator_print(offset=None):
     sep = "-" * 40
     if offset:
@@ -547,29 +578,55 @@ def separator_print(offset=None):
     print()
 
 
-# remove title & author:
-# 1) use character to jump beyond them
-# 2) if no chars ?
+def underprint(x):
+    print(x)
+    print("-" * len(x))
 
-# remove character list:
-# personages
-# entreparleurs
-# dramatis personae
-# idiosyncrasies & typos
 
-# reformat characters to uppercase and single line:
-# remove full stop
-# "–"
+# ----------------------------------------
+# files
 
-# add markers
 
-# remove ending:
-# FIN(.)
-# RIDEAU(.)
-# idiosyncrasies
+def save_lines(f, lines, le_dir, clean=False):
+    check_create_dir(le_dir, clean=clean)
+    with open(os.path.join(le_dir, f), "w") as o:
+        o.write("\n".join(lines))
+
+
+def get_lines(input_name, le_dir):
+    with open(
+        os.path.join(le_dir, input_name), "r", encoding="utf-8", errors="ignore"
+    ) as f:
+        raw = f.read()
+        lines = [l.strip() for l in raw.split("\n")]
+    return raw, lines, len(lines)
+
+
+def get_fnames(le_dir):
+    if os.path.isdir(le_dir):
+        fnames = [
+            x for x in os.listdir(le_dir) if ".txt" == os.path.splitext(x)[-1]
+        ]  # don't load vim *.swp files
+        n_files = len(fnames)
+        print(f"found {n_files} files in directory: {le_dir}")
+        separator_print()
+        return fnames, n_files
+    else:
+        print(f"{le_dir} directory not found.")
+
+
+def check_create_dir(d, clean=False):
+    if not os.path.isdir(d):
+        os.mkdir(d)
+    if clean:
+        [os.remove(os.path.join(d, f)) for f in os.listdir(d)]
+
 
 if __name__ == "__main__":
+
+    R = make_regices()
+
     try:
         main()
     except KeyboardInterrupt:
-        print('keyboard interrupt')
+        print("keyboard interrupt")
