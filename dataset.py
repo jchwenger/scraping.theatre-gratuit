@@ -22,61 +22,151 @@ def main():
     else:
         DATA = get_all_data(fnames, n_files, TXT_DIR, TRIM_DIR, load=True)
 
-    FORM_DIR = "formatted"
-    check_create_dir(FORM_DIR, clean=True)
-
+    fnames_ratio = []
+    pattern = r"\b\p{Lu}{4,}\b"
     for i, (f, data) in enumerate(DATA.items()):
-        print(f"{i+1:4}/{n_files} | attempting formatting of: {TRIM_DIR}/{f}")
-        data = format_caps(data)
-        if "formatted" in data:
-            save_lines(f, data["formatted"], le_dir=FORM_DIR)
+        print(f"{i:4}/{n_files} | calculating ratio for: {pattern} | {f}")
+        r = matches_to_lines_ratio(data, pattern)
+        fnames_ratio = binary_insert(fnames_ratio, (f,r))
 
     separator_print()
-    underprint(f"first pass done: files with characters in caps | saved to {FORM_DIR}/")
+    for x in fnames_ratio:
+        print(f"ratio: {x[1]:0.2f} | {x[0]}")
 
-    REST_DIR = "rest"
-    check_create_dir(REST_DIR, clean=True)
+    # # splitting
+    # save_split_groups(
+    #     "^[\p{Lu}]+[\p{Z}\p{P}]*$",
+    #     DATA,
+    #     le_dir=TRIM_DIR,
+    #     threshold=10,
+    #     le_dir_with="with",
+    #     le_dir_without="without",
+    #     verbose=True,
+    # )
 
-    UNFORMATTED = {}
-    for i, (f, data) in enumerate(DATA.items()):
-        if "unformatted" in data:
-            UNFORMATTED[f] = data
-    n_unf = len(UNFORMATTED.keys())
+    # # formatting
+    # FORM_DIR = "formatted"
+    # check_create_dir(FORM_DIR, clean=True)
 
-    for i, (f, data) in enumerate(UNFORMATTED.items()):
-        print(f"{i+1:4}/{n_unf} | writing: {REST_DIR}/{f}")
-        save_lines(f, data["unformatted"], le_dir=REST_DIR)
+    # for i, (f, data) in enumerate(DATA.items()):
+    #     print(f"{i+1:4}/{n_files} | attempting formatting of: {TRIM_DIR}/{f}")
+    #     data = format_caps(data)
+    #     if "formatted" in data:
+    #         save_lines(f, data["formatted"], le_dir=FORM_DIR)
 
-    separator_print()
-    underprint(f"saved unformatted files to {REST_DIR}/")
+    # separator_print()
+    # underprint(f"first pass done: files with characters in caps | saved to {FORM_DIR}/")
 
-    ds_dir = "theatregratuit-dataset"
-    if not os.path.isdir(ds_dir):
-        os.mkdir(ds_dir)
+    # REST_DIR = "rest"
+    # check_create_dir(REST_DIR, clean=True)
+
+    # UNFORMATTED = {}
+    # for i, (f, data) in enumerate(DATA.items()):
+    #     if "unformatted" in data:
+    #         UNFORMATTED[f] = data
+    # n_unf = len(UNFORMATTED.keys())
+
+    # for i, (f, data) in enumerate(UNFORMATTED.items()):
+    #     print(f"{i+1:4}/{n_unf} | writing: {REST_DIR}/{f}")
+    #     save_lines(f, data["unformatted"], le_dir=REST_DIR)
+
+    # separator_print()
+    # underprint(f"saved unformatted files to {REST_DIR}/")
+
+    # ds_dir = "theatregratuit-dataset"
+    # if not os.path.isdir(ds_dir):
+    #     os.mkdir(ds_dir)
 
 
-#----------------------------------------
+# ----------------------------------------
+# splitting corpus
+
+
+def save_split_groups(
+    reg,
+    data_dict,
+    le_dir,
+    threshold=1,
+    le_dir_with="with",
+    le_dir_without="without",
+    verbose=True,
+):
+    check_create_dir(le_dir_with, clean=True)
+    check_create_dir(le_dir_without, clean=True)
+    with_it, without = split_by_regex(
+        data_dict, reg, threshold=threshold, verbose=verbose
+    )
+    print(f"files with pattern saved to {le_dir_with}")
+    print(f"files without pattern saved to {le_dir_without}")
+    for i, f in enumerate(with_it):
+        shutil.copyfile(os.path.join(le_dir, f), os.path.join(le_dir_with, f))
+    for i, f in enumerate(without):
+        shutil.copyfile(os.path.join(le_dir, f), os.path.join(le_dir_without, f))
+
+
+def split_by_regex(data_dict, pattern, threshold=1, verbose=True):
+    with_pattern = []
+    without_pattern = []
+    if verbose:
+        underprint(f"splitting data: is there {threshold} occurrences of {pattern}?")
+    total = len(data_dict.keys())
+    for i, (fname, data) in enumerate(data_dict.items()):
+        if verbose:
+            print(f"{i+1:4}/{total} | searching in {fname}")
+        found = 0
+        for l in data["trimmed"]:
+            if regex.search(pattern, l):
+                found += 1
+                if found == threshold:
+                    break
+        if found == threshold:
+            with_pattern.append(fname)
+        else:
+            without_pattern.append(fname)
+    if verbose:
+        separator_print()
+        print(f"pattern:       {pattern}")
+        print(f"files with:    {len(with_pattern)}")
+        print(f"files without: {len(without_pattern)}")
+    return with_pattern, without_pattern
+
+
+def matches_to_lines_ratio(data, pattern, verbose=False):
+    f = data["fname"]
+    lines = data["trimmed"]
+    lines_len = data["trimmed_len"]
+    n_matches = 0
+    for l in lines:
+        n_matches += len(regex.findall(pattern, l))
+    r = n_matches / lines_len
+    if verbose:
+        print(f"ratio: {r:.2f} | n_matches: {n_matches:4} for {lines_len:4} lines | {f}")
+    return r
+
+
+# ----------------------------------------
 # Formatting
+
 
 def format_caps(data):
 
     formatted = ["<|s|>"]
 
-
-    if data["fname"] in ("count-1004248-LARTICLE_330_-_Georges_Courteline.txt",
-                         "count-1004275-LIMPROMPTU_DE_VERSAILLES_-_Moliere.txt",
-                         "count-1004244-LIOLA_-_Luigi_Pirandello.txt",
-                         "count-1004282-MAGDA_EST_LA_ET_NEST_PAS_LA_-_Jean_Sibil.txt",
-                         "count-1029795-HOTEL_DU_LIBRE-ECHANGE_II_-_Jean_Sibil.txt",
-                         "count-1045935-Le_Pendu_-_Charles_Cros.txt ",
-                         "count-1045947-Lhomme_propre_-_Charles_Cros.txt",
-                         "count-1072551-dodutt.txt",
-                         "count-1396213-Roberto_Succo.txt",
-                         "count-1470266-LElecteur.txt",
-                         "count-1470267-SUZANNE_ET_LES_VENERABLES.txt ",
-                         "count-1045935-Le_Pendu_-_Charles_Cros.txt ",
-                         "count-1470267-SUZANNE_ET_LES_VENERABLES.txt",
-                        ):
+    if data["fname"] in (
+        "count-1004248-LARTICLE_330_-_Georges_Courteline.txt",
+        "count-1004275-LIMPROMPTU_DE_VERSAILLES_-_Moliere.txt",
+        "count-1004244-LIOLA_-_Luigi_Pirandello.txt",
+        "count-1004282-MAGDA_EST_LA_ET_NEST_PAS_LA_-_Jean_Sibil.txt",
+        "count-1029795-HOTEL_DU_LIBRE-ECHANGE_II_-_Jean_Sibil.txt",
+        "count-1045935-Le_Pendu_-_Charles_Cros.txt ",
+        "count-1045947-Lhomme_propre_-_Charles_Cros.txt",
+        "count-1072551-dodutt.txt",
+        "count-1396213-Roberto_Succo.txt",
+        "count-1470266-LElecteur.txt",
+        "count-1470267-SUZANNE_ET_LES_VENERABLES.txt ",
+        "count-1045935-Le_Pendu_-_Charles_Cros.txt ",
+        "count-1470267-SUZANNE_ET_LES_VENERABLES.txt",
+    ):
         formatted.extend(data["trimmed"])
         # add very end markers, trim lines
         formatted = markers_final_cleanup(formatted)
@@ -91,7 +181,6 @@ def format_caps(data):
 
         # remove footnote calls (digit)
         l = regex.sub(R["(footnote)"], "", l)
-
 
         # ------------------------------------------------------------------------
         # FAT MAJORITY: CAPS
@@ -109,60 +198,92 @@ def format_caps(data):
         # check that previous line is not already with full caps
         if word_init:
 
-            rest = l[word_init.span()[1]:]
+            rest = l[word_init.span()[1] :]
 
             # is there a dot'n'dash straight away?
             dot_n_dash = regex.match(R["dot_n_dash"], rest)
-            cont, formatted, skipped = append_splits(formatted, R["dot_n_dash"], l, rest,
-                                                     skipped, word_init.span()[1])
-            if cont: continue
+            cont, formatted, skipped = append_splits(
+                formatted, R["dot_n_dash"], l, rest, skipped, word_init.span()[1]
+            )
+            if cont:
+                continue
 
             # is there a colon straight away?
-            cont, formatted, skipped = append_splits(formatted, R["colon"], l, rest,
-                                                     skipped, word_init.span()[1])
-            if cont: continue
+            cont, formatted, skipped = append_splits(
+                formatted, R["colon"], l, rest, skipped, word_init.span()[1]
+            )
+            if cont:
+                continue
 
             # get all caps words on the line, and check the last one,
             # find the last one (https://stackoverflow.com/a/2988680)
             more_caps_words = regex.finditer(R["WORD"], l)
             last_caps_word = None
-            for last_caps_word in more_caps_words: pass
+            for last_caps_word in more_caps_words:
+                pass
             if last_caps_word:
 
-                rest = l[last_caps_word.span()[1]:]
+                rest = l[last_caps_word.span()[1] :]
 
                 if rest:
 
                     # check for colon
-                    cont, formatted, skipped = append_splits(formatted, R["colon"], l, rest,
-                                                             skipped, last_caps_word.span()[1])
-                    if cont: continue
+                    cont, formatted, skipped = append_splits(
+                        formatted,
+                        R["colon"],
+                        l,
+                        rest,
+                        skipped,
+                        last_caps_word.span()[1],
+                    )
+                    if cont:
+                        continue
 
                     # check for comma and dash
-                    cont, formatted, skipped = append_splits(formatted, R["comma_dash"], l, rest,
-                                                             skipped, last_caps_word.span()[1])
-                    if cont: continue
+                    cont, formatted, skipped = append_splits(
+                        formatted,
+                        R["comma_dash"],
+                        l,
+                        rest,
+                        skipped,
+                        last_caps_word.span()[1],
+                    )
+                    if cont:
+                        continue
 
                     # check for didascalia: find colon later
-                    cont, formatted, skipped = append_splits(formatted, R["colon"], l, rest,
-                                                             skipped, last_caps_word.span()[1],
-                                                             search=True)
-                    if cont: continue
+                    cont, formatted, skipped = append_splits(
+                        formatted,
+                        R["colon"],
+                        l,
+                        rest,
+                        skipped,
+                        last_caps_word.span()[1],
+                        search=True,
+                    )
+                    if cont:
+                        continue
 
                     # check for didascalia: find either dot or dot'n'dash later
-                    cont, formatted, skipped = append_splits(formatted, R["dot_opt_dash"], l, rest,
-                                                             skipped, last_caps_word.span()[1],
-                                                             search=True)
-                    if cont: continue
+                    cont, formatted, skipped = append_splits(
+                        formatted,
+                        R["dot_opt_dash"],
+                        l,
+                        rest,
+                        skipped,
+                        last_caps_word.span()[1],
+                        search=True,
+                    )
+                    if cont:
+                        continue
 
                 else:
 
                     formatted, skipped = append_markers(formatted, skipped)
-                    formatted.append(l[:last_caps_word.span()[1]] + ".")
+                    formatted.append(l[: last_caps_word.span()[1]] + ".")
                     continue
 
-            more_caps_words, last_caps_word = None, None # needs reset
-
+            more_caps_words, last_caps_word = None, None  # needs reset
 
         # otherwise just append the line
         formatted.append(l)
@@ -186,11 +307,11 @@ def append_splits(formatted, reg, l, rest, skipped, end_ind, search=False):
         reg_re = regex.match(reg, rest)
     if reg_re:
         formatted, skipped = append_markers(formatted, skipped)
-        if search: # end of prefix just after didascalia, before boundary punctuation
+        if search:  # end of prefix just after didascalia, before boundary punctuation
             end_ind += reg_re.span()[0]
         start = l[:end_ind] + "."
         formatted.append(start)
-        formatted = check_append(formatted, rest[reg_re.span()[1]:])
+        formatted = check_append(formatted, rest[reg_re.span()[1] :])
         return True, formatted, skipped
     else:
         return False, formatted, skipped
@@ -223,6 +344,7 @@ def remove_trailing_lines(lines):
                 return lines[:-i]
     else:
         return lines
+
 
 # ---------------------------------------
 # Les Regices
@@ -303,6 +425,7 @@ def make_regices():
         ),
         # single file with "A. or B. as characters: count-3202657-De_la_liberte.txt"
         "LETTER_CHARS": regex.compile("^(\p{Lu}\.)\p{Z}\p{Pd}\p{Z}"),
+        # ----------------------------
         # regices for innards cleaning
         # ----------------------------
         # letters & space, possibly a parenthesis, : or — at the end
@@ -338,21 +461,23 @@ def index_of_regex_match(lines, r, trim=True):
     lines_len = len(lines)
     ind = 0
     found = False
-    for i,l in enumerate(lines):
-        if found: break
+    for i, l in enumerate(lines):
+        if found:
+            break
         if regex.search(r, l):
             found = True
             k = 1
             if trim:
-                while i + k < lines_len and \
-                 regex.match(R["blank_line"], lines[i + k]):
+                while i + k < lines_len and regex.match(R["blank_line"], lines[i + k]):
                     k += 1
             ind = i + k
             break
     return ind
 
+
 # ----------------------------------------
 # data pipelines
+
 
 def get_all_data(fnames, n_files, txt_dir, trim_dir, load=False):
     D = {}
@@ -371,6 +496,7 @@ def get_all_data(fnames, n_files, txt_dir, trim_dir, load=False):
         underprint(f"finished loading from {txt_dir} & trimming saved to {trim_dir}/")
     return D
 
+
 def get_data(f, le_dir, trim=True, trim_dir="trimmed"):
     raw, lines, lines_len = get_lines(f, le_dir=le_dir)
     data = {
@@ -382,13 +508,11 @@ def get_data(f, le_dir, trim=True, trim_dir="trimmed"):
     if trim:
         trimmed, indices = trim_lines(f, lines, lines_len)
         trimmed_len = len(trimmed)
-        data.update({"trimmed": trimmed,
-                     "trimmed_len": trimmed_len})
+        data.update({"trimmed": trimmed, "trimmed_len": trimmed_len})
         data.update(indices)
     else:
         _, trimmed, trimmed_len = get_lines(f, le_dir=trim_dir)
-        data.update({"trimmed": trimmed,
-                     "trimmed_len": trimmed_len})
+        data.update({"trimmed": trimmed, "trimmed_len": trimmed_len})
     return data
 
 
@@ -567,7 +691,7 @@ def print_file_stats(fname, i, n_files, char_index, author_index, end_index):
 
 
 def print_lines(lines):
-    print('\n'.join(lines))
+    print("\n".join(lines))
 
 
 def separator_print(offset=None):
@@ -621,6 +745,25 @@ def check_create_dir(d, clean=False):
     if clean:
         [os.remove(os.path.join(d, f)) for f in os.listdir(d)]
 
+#----------------------------------------
+# other utils
+
+def binary_insert(lst, el):
+    if not lst:
+        return [el]
+    half = len(lst)//2
+    lo = lst[:half]
+    hi = lst[half:]
+    if el[1] > hi[0][1]:
+        if len(hi) > 1:
+            hi = binary_insert(hi, el)
+        else:
+            return hi + [el]
+    elif lo and el[1] < lo[-1][1]:
+        lo = binary_insert(lo, el)
+    else:
+        return lo + [el] + hi
+    return lo + hi
 
 if __name__ == "__main__":
 
