@@ -3,8 +3,7 @@ import bs4
 import regex
 import shutil
 import pickle
-from bs4 import BeautifulSoup
-
+from collections import Counter
 
 def main():
 
@@ -17,32 +16,36 @@ def main():
     TRIM_DIR = "trimmed"
     check_create_dir(TRIM_DIR)
 
-    DUMP = ".DATA.pkl"
-
-    # if trimming already happened, just load the files
-    if not os.path.isfile(DUMP):
-        DATA = get_all_data(fnames, n_files, TXT_DIR, TRIM_DIR)
-        with open(DUMP, 'wb') as o:
-            pickle.dump(DATA, o, pickle.HIGHEST_PROTOCOL)
-        print(f"saving data as {DUMP}")
-    else:
-        print(f"loading data from {DUMP}")
-        with open(DUMP, 'rb') as f:
-            DATA = pickle.load(f)
-
     # formatting
     FORM_DIR = "formatted"
     check_create_dir(FORM_DIR, clean=True)
 
-    limit = 50
-    for i, (f, data) in enumerate(DATA.items()):
-        # if i > limit: break
-        # if f != "count-2975020-LES_PHENICIENNES.txt": continue
-        print(f"{i+1:4}/{n_files} | attempting formatting of: {TRIM_DIR}/{f}")
-        data = format_caps(data)
+    DUMP = ".DATA.pkl"
 
-    separator_print()
-    underprint(f"first pass done: files with characters in caps")
+    # if process already done, just load the files
+    if not os.path.isfile(DUMP):
+
+        DATA = get_all_data(fnames, n_files, TXT_DIR, TRIM_DIR)
+
+        # limit = 50
+        for i, (f, data) in enumerate(DATA.items()):
+            # if i > limit: break
+            # if f != "count-2975020-LES_PHENICIENNES.txt": continue
+            print(f"{i+1:4}/{n_files} | attempting formatting of: {TRIM_DIR}/{f}")
+            data = add_formatting_upper(data)
+
+        separator_print()
+        underprint(f"first pass done: files with characters in caps")
+
+        with open(DUMP, 'wb') as o:
+            pickle.dump(DATA, o, pickle.HIGHEST_PROTOCOL)
+        print(f"saving data as {DUMP}")
+
+    else:
+
+        print(f"loading data from {DUMP}")
+        with open(DUMP, 'rb') as f:
+            DATA = pickle.load(f)
 
     REST_DIR = "rest"
     check_create_dir(REST_DIR, clean=True)
@@ -53,18 +56,26 @@ def main():
 
     n_unf = 0
     threshold = 5
+    for i, (f, data) in enumerate(DATA.items()):
+        if data["markers_count"] > threshold:
+            print(f"{i+1:4}/{n_files} | above {threshold} markers found, saved to: {FORM_DIR}/{f}")
+            save_lines(f, data["formatted"], le_dir=FORM_DIR)
+        else:
+            n_unf += 1
+
+    separator_print()
+    i = 0
     for f, data in DATA.items():
         if data["markers_count"] < threshold:
-            n_unf += 1
-            print(f"{i+1:4}/{n_files} | below {threshold} markers, saved to: {REST_DIR}/{f}")
-            save_lines(f, data["formatted"], le_dir=REST_DIR)
-        else:
-            print(f"{i+1:4}/{n_files} | above {threshold} markers, saved to: {FORM_DIR}/{f}")
-            save_lines(f, data["formatted"], le_dir=FORM_DIR)
+            i += 1
+            print(f"{i:4}/{n_unf} | below {threshold} markers found, processing & saving to: {REST_DIR}/{f}")
+            data = add_character_counter(data)
+            data = add_formatting_lower(data)
+            save_lines(f, data["char_formatted"], le_dir=REST_DIR)
 
     separator_print()
     print(f"saved {n_files - n_unf} formatted files to {FORM_DIR}/")
-    underprint(f"{n_unf} unformatted files to {REST_DIR}/")
+    underprint(f"saved {n_unf} char formatted files to {REST_DIR}/")
 
     ds_dir = "theatregratuit-dataset"
     if not os.path.isdir(ds_dir):
@@ -72,7 +83,30 @@ def main():
 
 
 # ----------------------------------------
-# splitting corpus
+# splitting & other corpus utils
+
+def add_character_counter(data, threshold=1):
+    lines = data["formatted"]
+    C = Counter()
+    for i, l in enumerate(lines):
+        # init char including L'/M. and short dash, until the first punctuation mark
+        char_re = regex.match(R["char_init_dot_dash_colon"], l)
+        if char_re:
+            C[char_re.group(1).strip()] += 1
+    # no empty dicts
+    if C:
+        # only dicts with at least one repeated el will be valid
+        only_ones = True
+        for el in C:
+            if C[el] > 1:
+                only_ones = False
+                break
+
+        if not only_ones:
+            # https://stackoverflow.com/a/15862021
+            data["char_counter"] = Counter(el for el in C.elements() if C[el] >= threshold)
+
+    return data
 
 def add_double_markers_count(data):
     lines = data["formatted"]
@@ -147,10 +181,70 @@ def matches_to_lines_ratio(data, pattern, verbose=False):
 
 
 # ----------------------------------------
-# Formatting
+# formatting
+
+def add_formatting_lower(data):
+
+    if "char_counter" not in data:
+        data["char_formatted"] = data["formatted"]
+        return data
+
+    char_formatted = [] # add the initial marker
+
+    # skip first match, so that entire start of text caught in one extract
+    # (adding <|s|> at the very top of file after the loop)
+    skipped = False
+
+    for i, l in enumerate(data["formatted"]):
+        found_char = False
+        for (char, cnt) in data["char_counter"].most_common():
+            if found_char:
+                break
+            char_re = regex.match(char, l)
+            if char_re:
+                found_char = True
+                end_cr = char_re.span()[1]
+                start = l[:end_cr]
+                rest = l[end_cr:]
+
+                # is the rest just empty / only punct
+                if regex.match(R["trailing_punct"], rest):
+                    char_formatted, skipped = append_markers(char_formatted, skipped)
+                    char_formatted.append(start.upper() + ".")
+                    break
+
+                # check for dot'n'dash
+                brk, char_formatted, skipped = word_init_append_splits(
+                    char_formatted, R["[.,] —"], l, rest, skipped, end_cr, "search"
+                )
+                if brk:
+                    break
+
+                # check for :
+                brk, char_formatted, skipped = word_init_append_splits(
+                    char_formatted, R[":"], l, rest, skipped, end_cr, "search"
+                )
+                if brk:
+                    break
+
+                # is there a parenthesis
+
+                # # is there a comma then didasc
+                # if regex.match(R[","], rest):
+                #     pass
+
+        if not found_char:
+            char_formatted.append(l)
+
+    # save lines
+    data["char_formatted"] = char_formatted
+
+    # print_lines(char_formatted)
+
+    return data
 
 
-def format_caps(data):
+def add_formatting_upper(data):
 
     formatted = ["<|s|>"]
 
@@ -505,7 +599,7 @@ def make_regices():
             "^(?:\p{Lu}[.']\p{Z}*)?([\p{L}\p{Pd}\p{Z}]+)\p{Z}*[,.]*\p{Z}*[–—]+\p{Z}*$"
         ),
 
-        "[.,] —": regex.compile("\p{Z}*[,.]*\p{Z}*\p{Pd}+\p{Z}*"),
+        "[.,] —": regex.compile("\p{Z}*[,.]*\p{Z}*-?[—–]+\p{Z}*"),
         ".( —)?": regex.compile("\p{Z}*\.\p{Z}*\p{Pd}*\p{Z}*"),
         ":": regex.compile("\p{Z}*:\p{Z}*"),
         ".": regex.compile("\p{Z}*\.\p{Z}*"),
@@ -536,6 +630,10 @@ def make_regices():
         # lower case character, optionally with didasc, ending in dot and dash,
         "char_lc_dot_dash": regex.compile(
             "^([\p{Ll}\p{Z}]+)" + "(([,\p{Z}].*?)*)" + "\.\p{Z}*\p{Pd}\p{Z}*"
+        ),
+
+        "char_init_dot_dash_colon": regex.compile(
+            r"^((?:\p{Lu}[.']\p{Z}*)?[\p{L}\p{Z}\-']+)\p{Z}*(:|[.,]\p{Z}*[–—])"
         ),
 
         # ----------------------------
