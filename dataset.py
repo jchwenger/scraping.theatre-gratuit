@@ -105,12 +105,19 @@ def main():
 
     separator_print()
     print(f"saved {n_files - n_unf} formatted files to {FORM_DIR}/")
-    underprint(f"saved {n_unf} char formatted files to {REST_DIR}/")
+    print(f"saved {n_unf} char formatted files to {REST_DIR}/")
+    separator_print()
 
-    ds_dir = "theatregratuit-dataset"
-    if not os.path.isdir(ds_dir):
-        os.mkdir(ds_dir)
+    DS_DIR = "theatregratuit-dataset"
+    if not os.path.isdir(DS_DIR):
+        os.mkdir(DS_DIR, clean=True)
 
+    underprint(f"saving a copy of all files to {DS_DIR}")
+    for f, _ in DATA.items():
+        if os.path.isfile(os.path.join(FORM_DIR, f)):
+            shutil.copyfile(os.path.join(FORM_DIR, f), os.path.join(DS_DIR, f))
+        if os.path.isfile(os.path.join(REST_DIR, f)):
+            shutil.copyfile(os.path.join(REST_DIR, f), os.path.join(DS_DIR, f))
 
 # ----------------------------------------
 # splitting & other corpus utils
@@ -237,10 +244,10 @@ def add_formatting_lower(data):
 
     for i, l in enumerate(data["formatted"]):
         found_char = False
-        for (char, cnt) in data["char_counter"].most_common():
+        for (char, cnt) in reversed(data["char_counter"].most_common()):
             if found_char:
                 break
-            char_re = regex.match(char, l)
+            char_re = regex.match(char + "\\b", l)
             if char_re:
                 found_char = True
                 end_cr = char_re.span()[1]
