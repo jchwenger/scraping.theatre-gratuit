@@ -109,8 +109,7 @@ def main():
     separator_print()
 
     DS_DIR = "theatregratuit-dataset"
-    if not os.path.isdir(DS_DIR):
-        os.mkdir(DS_DIR, clean=True)
+    check_create_dir(DS_DIR, clean=True)
 
     underprint(f"saving a copy of all files to {DS_DIR}")
     for f, _ in DATA.items():
