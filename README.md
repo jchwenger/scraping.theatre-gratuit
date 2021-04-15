@@ -1,4 +1,6 @@
-# Scraping [Théatre gratuit](https://theatregratuit.com/)
+# Scraping Théatre gratuit
+
+Extracting all plays from [Théatre gratuit](https://theatregratuit.com/).
 
 Using Python 3, [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/bs4/doc/) and [regex](https://pypi.org/project/regex/).
 
